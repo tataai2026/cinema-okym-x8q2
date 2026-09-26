@@ -47,7 +47,9 @@ input[type=search] {
   border: 1px solid var(--line); background: var(--panel); color: var(--ink);
   border-radius: 999px; padding: 5px 14px; font: inherit; width: 200px;
 }
-label.chk { color: var(--sub); font-size: 13px; display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+label.chk { color: var(--sub); font-size: 13px; display: inline-flex; gap: 5px; align-items: center; cursor: pointer; margin-left: auto; white-space: nowrap; }
+.top { align-items: center; }
+.meta .sp { display: none; }
 main { padding: 18px 24px 60px; max-width: 1280px; margin: 0 auto; }
 .empty { color: var(--sub); padding: 40px 0; text-align: center; }
 
@@ -93,11 +95,35 @@ a.item:hover { background: var(--chip); }
 .item.past { opacity: .4; }
 
 @media (max-width: 700px) {
-  header, main { padding-left: 16px; padding-right: 16px; }
-  .grid { grid-template-columns: 1fr; }
-  .item { grid-template-columns: 70px 1fr; }
+  /* ヘッダーを約4行に圧縮。日付と館は横スクロール */
+  header { padding: 8px 12px 8px; }
+  main { padding: 10px 10px 40px; }
+  .top { gap: 8px; flex-wrap: nowrap; }
+  .meta .pc { display: none; } .meta .sp { display: inline; }
+  h1 { font-size: 15px; letter-spacing: .04em; }
+  .meta { font-size: 10px; }
+  label.chk { font-size: 11px; }
+  .row { margin-top: 6px; gap: 6px; }
+  .row.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-left: -12px; margin-right: -12px; padding: 0 12px; }
+  .row.scroll::-webkit-scrollbar { display: none; }
+  .days button, .th { flex: none; padding: 3px 10px; font-size: 12px; min-width: 0; }
+  .ctrl { flex-wrap: nowrap; }
+  .seg button { padding: 3px 10px; font-size: 12px; }
+  input[type=search] { flex: 1; min-width: 0; width: auto; padding: 3px 12px; font-size: 16px; } /* 16px未満だとiPhoneで勝手にズームする */
+  .seg { flex: none; }
+
+  /* カード：館名を上に、時間は横幅いっぱいに */
+  .grid { grid-template-columns: 1fr; gap: 10px; }
+  .card { padding: 10px; gap: 10px; }
+  .card img { width: 60px; height: 86px; }
+  .card h2 { font-size: 14px; }
+  .info, .credits { font-size: 11px; }
+  .tr { flex-direction: column; gap: 3px; padding: 5px 0; }
+  .tname { width: auto; padding-top: 0; }
+  .tm { font-size: 12px; padding: 2px 7px; }
+
+  .item { grid-template-columns: 70px 1fr; padding: 7px 10px; gap: 8px; }
   .item .where { grid-column: 2; }
-  input[type=search] { width: 100%; }
 }
 </style>
 </head>
@@ -107,12 +133,11 @@ a.item:hover { background: var(--chip); }
     <h1>岡山シネマ一覧</h1>
     <span class="meta" id="meta"></span>
     <span class="warn" id="warn"></span>
-  </div>
-  <div class="row days" id="days"></div>
-  <div class="row">
-    <div id="ths" class="row" style="margin:0"></div>
-    <span class="spacer"></span>
     <label class="chk"><input type="checkbox" id="hidePast" checked> 終わった回を隠す</label>
+  </div>
+  <div class="row days scroll" id="days"></div>
+  <div class="row scroll" id="ths"></div>
+  <div class="row ctrl">
     <input type="search" id="q" placeholder="作品名・監督・出演者で絞り込み">
     <div class="seg" id="seg">
       <button data-v="film" class="on">作品別</button>
@@ -147,7 +172,10 @@ try { Object.assign(state, JSON.parse(localStorage.getItem("cn") || "{}"), { day
 const save = () => { try { localStorage.setItem("cn", JSON.stringify({ view: state.view, off: [...state.off], hidePast: state.hidePast })); } catch (e) {} };
 
 // ヘッダー
-$("#meta").textContent = `データ更新：${DATA.generated}（映画.comより）`;
+{
+  const [d, t] = DATA.generated.split(" "), [, mo, da] = d.split("-").map(Number);
+  $("#meta").innerHTML = `<span class="pc">データ更新：${d} ${t}（映画.comより）</span><span class="sp">${mo}/${da} ${t} 更新</span>`;
+}
 const bad = DATA.theaters.filter(t => !DATA.status[t.id]?.ok).map(t => t.name);
 if (bad.length) $("#warn").textContent = `取得失敗：${bad.join("、")}（前回データを表示）`;
 
