@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import time
+import unicodedata
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,13 +17,16 @@ DATA_FILE = HERE / "data.json"
 TEMPLATE = HERE / "template.html"
 OUTPUT = HERE / "index.html"
 
+# url: 映画.com（メイン。監督・出演・チケットリンクもここから）
+# mw:  MovieWalker（映画.comより先に翌週分が載ることがあるので、足りない日付だけ補う）
 THEATERS = [
-    {"id": "aeon", "name": "イオンシネマ岡山", "url": "https://eiga.com/theater/33/330101/7089/"},
-    {"id": "toho", "name": "TOHOシネマズ岡南", "url": "https://eiga.com/theater/33/330101/6007/"},
-    {"id": "movix", "name": "MOVIX倉敷", "url": "https://eiga.com/theater/33/330201/6013/"},
-    {"id": "clair", "name": "シネマ・クレール", "url": "https://eiga.com/theater/33/330101/6009/"},
-    {"id": "merpa", "name": "岡山メルパ", "url": "https://eiga.com/theater/33/330101/6008/"},
+    {"id": "aeon", "name": "イオンシネマ岡山", "url": "https://eiga.com/theater/33/330101/7089/", "mw": "th697"},
+    {"id": "toho", "name": "TOHOシネマズ岡南", "url": "https://eiga.com/theater/33/330101/6007/", "mw": "th65"},
+    {"id": "movix", "name": "MOVIX倉敷", "url": "https://eiga.com/theater/33/330201/6013/", "mw": "th601"},
+    {"id": "clair", "name": "シネマ・クレール", "url": "https://eiga.com/theater/33/330101/6009/", "mw": "th478"},
+    {"id": "merpa", "name": "岡山メルパ", "url": "https://eiga.com/theater/33/330101/6008/", "mw": "th417"},
 ]
+JST = timezone(timedelta(hours=9))
 
 UA = "Mozilla/5.0 (personal schedule viewer; low frequency)"
 TIME_RE = re.compile(
@@ -76,6 +80,74 @@ def parse(page, theater_id):
     return films, shows, days
 
 
+def norm_title(s):
+    """映画.comとMovieWalkerで表記ゆれする作品名を突き合わせるためのキー"""
+    s = unicodedata.normalize("NFKC", s).lower()
+    return re.sub(r"[\s・:：!！?？、。,.「」『』〈〉《》【】/\"'“”‘’\-‐–—~〜☆★♪]", "", s)
+
+
+def parse_mw(page, theater_id):
+    """MovieWalkerの劇場スケジュールページ → [(作品情報, [上映回])]"""
+    today = datetime.now(JST).date()
+    out = []
+    for art in re.findall(r"<article>(.*?)</article>", page, re.S):
+        mv = re.search(r'href="/(mv\d+)/"', art)
+        h2 = re.search(r"<h2>(.*?)</h2>", art, re.S)
+        if not (mv and h2):
+            continue
+        img = re.search(r'<img[^>]*src="([^"]+)"', art)
+        meta = re.search(r'bl_theaterSchedule_date_rating">(.*?)</div>', art, re.S)
+        film = {
+            "mw": mv.group(1),
+            "title": text(h2.group(1)),
+            "poster": html.unescape(img.group(1)) if img else None,
+            "info": [x for x in re.split(r"[、,]", text(meta.group(1))) if x] if meta else [],
+            "rating": None,
+            "url": f"https://press.moviewalker.jp/{mv.group(1)}/",
+        }
+        shows = []
+        for block in art.split('<div class="bl_screen">')[1:]:
+            head = block.split('<div class="bl_screen_attention"')[0]
+            types = [x for x in text(re.sub(r"<[^>]+>", " ", head)).split() if x != "上映形式"]
+            for li in re.finditer(r'<div class="date([^"]*)">\s*(\d{1,2})/(\d{1,2})(.*?)</dd>', block, re.S):
+                month, day = int(li.group(2)), int(li.group(3))
+                year = today.year + (1 if month < today.month - 6 else 0)
+                date = f"{year}{month:02d}{day:02d}"
+                for t in re.finditer(r'<(a|div) class="startTime[^"]*"([^>]*)>\s*(\d{1,2}:\d{2})\s*</\1>', li.group(4)):
+                    href = re.search(r'data-href="([^"]+)"', t.group(2))
+                    shows.append({
+                        "t": theater_id, "d": date, "s": t.group(3), "e": None, "type": types,
+                        "link": html.unescape(href.group(1)) if href else None,
+                        "_daycls": li.group(1).strip(),
+                    })
+        if shows:
+            out.append((film, shows))
+    return out
+
+
+def merge_mw(films, shows, days, mw_pages):
+    """映画.comに無い日付の上映回だけMovieWalkerから足す"""
+    by_title = {norm_title(f["title"]): m for m, f in films.items()}
+    added = 0
+    for theater_id, parsed in mw_pages.items():
+        have = {s["d"] for s in shows if s["t"] == theater_id}
+        for film, mw_shows in parsed:
+            new = [s for s in mw_shows if s["d"] not in have]
+            if not new:
+                continue
+            movie_id = by_title.get(norm_title(film["title"]))
+            if not movie_id:  # 映画.comにまだ載っていない新作
+                movie_id = film["mw"]
+                films.setdefault(movie_id, {k: v for k, v in film.items() if k != "mw"})
+                by_title[norm_title(film["title"])] = movie_id
+            for s in new:
+                cls = s.pop("_daycls")
+                days.setdefault(s["d"], "holiday" if "sunday" in cls else cls)
+                shows.append({**s, "m": movie_id, "src": "mw"})
+                added += 1
+    return added
+
+
 CREDITS_FILE = HERE / "credits.json"
 MAX_CAST = 4
 
@@ -83,7 +155,7 @@ MAX_CAST = 4
 def fetch_credits(films):
     """監督・主な出演者を作品ページのJSON-LDから取る。一度取った作品は credits.json に保存して再取得しない。"""
     cache = json.loads(CREDITS_FILE.read_text(encoding="utf-8")) if CREDITS_FILE.exists() else {}
-    todo = [m for m in films if m not in cache]
+    todo = [m for m in films if m not in cache and not m.startswith("mv")]  # mv〜はMovieWalkerのみの作品
     for i, movie_id in enumerate(todo):
         time.sleep(1.5)
         try:
@@ -128,6 +200,16 @@ def main():
                     if x["m"] in old["films"]:
                         films.setdefault(x["m"], old["films"][x["m"]])
                 status[th["id"]]["stale"] = True
+
+    mw_pages = {}
+    for th in THEATERS:
+        time.sleep(2)
+        try:
+            mw_pages[th["id"]] = parse_mw(get(f"https://press.moviewalker.jp/{th['mw']}/schedule/"), th["id"])
+        except Exception as e:
+            print(f"NG  MovieWalker {th['name']}: {e}", file=sys.stderr)
+    added = merge_mw(films, shows, days, mw_pages)
+    print(f"MovieWalkerで補った上映回: {added}回")
 
     fetch_credits(films)
     data = {

@@ -39,6 +39,8 @@ h1 { font-size: 18px; margin: 0; letter-spacing: .08em; font-weight: 700; }
 .days button { min-width: 78px; }
 .days button.sat { color: var(--sat); } .days button.sun { color: var(--sun); }
 .days button.on, .seg button.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.pre { font-style: normal; font-size: 10px; margin-left: 4px; padding: 0 4px; border-radius: 3px; background: var(--chip); color: var(--sub); }
+.note { font-size: 12px; color: var(--sub); background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
 .th { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .th.off { opacity: .35; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
@@ -179,12 +181,14 @@ const save = () => { try { localStorage.setItem("cn", JSON.stringify({ view: sta
 const bad = DATA.theaters.filter(t => !DATA.status[t.id]?.ok).map(t => t.name);
 if (bad.length) $("#warn").textContent = `取得失敗：${bad.join("、")}（前回データを表示）`;
 
+// MovieWalkerで補った日（映画.comにまだ出ていない翌週分）
+const prelim = new Set(DATA.shows.filter(s => s.src === "mw").map(s => s.d));
 $("#days").innerHTML = dayKeys.map(d => {
   const dt = new Date(+d.slice(0,4), +d.slice(4,6) - 1, +d.slice(6,8));
   const w = dt.getDay(), cls = DATA.days[d] || "";
   const c = w === 6 ? "sat" : (w === 0 || cls.includes("holiday")) ? "sun" : "";
   const label = d === todayKey ? "今日" : `${dt.getMonth()+1}/${dt.getDate()}`;
-  return `<button data-d="${d}" class="${c}">${label}（${WD[w]}）</button>`;
+  return `<button data-d="${d}" class="${c}">${label}（${WD[w]}）${prelim.has(d) ? `<i class="pre">速報</i>` : ""}</button>`;
 }).join("");
 $("#ths").innerHTML = DATA.theaters.map(t => `<button class="th" data-t="${t.id}">${dot(t.id)}${esc(t.name)}</button>`).join("");
 $("#hidePast").checked = state.hidePast;
@@ -278,9 +282,11 @@ function render() {
   document.querySelectorAll("#ths .th").forEach(b => b.classList.toggle("off", state.off.has(b.dataset.t)));
   document.querySelectorAll("#seg button").forEach(b => b.classList.toggle("on", b.dataset.v === state.view));
   const list = shows();
-  $("#main").innerHTML = !state.day ? `<div class="empty">データが古くなっています。「更新して開く.bat」を実行してください。</div>`
+  const note = prelim.has(state.day)
+    ? `<div class="note">この日は速報版です（MovieWalkerより）。終了時刻が出ない・一部の作品が抜けている場合があります。映画.comに載り次第、正式なデータに切り替わります。</div>` : "";
+  $("#main").innerHTML = note + (!state.day ? `<div class="empty">データが古くなっています。「更新して開く.bat」を実行してください。</div>`
     : !list.length ? `<div class="empty">該当する上映回がありません</div>`
-    : state.view === "film" ? renderFilm(list) : renderTime(list);
+    : state.view === "film" ? renderFilm(list) : renderTime(list));
 }
 render();
 </script>

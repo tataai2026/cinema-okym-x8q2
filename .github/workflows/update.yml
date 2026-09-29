@@ -3,6 +3,7 @@ name: update
 on:
   schedule:
     - cron: "0 21 * * *"  # 毎朝6:00（日本時間）
+    - cron: "0 9 * * *"   # 18:00（翌週分の発表を早めに拾う）
   workflow_dispatch:       # GitHubの画面から手動でも実行できる
 
 permissions:
